@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#F2F5F1" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0C1310" media="(prefers-color-scheme: dark)">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -54,6 +54,7 @@ html,body{height:100%}
 body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:17px;line-height:1.35;-webkit-tap-highlight-color:transparent}
 body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:30;background:var(--bg)}
 button{font:inherit;color:inherit;cursor:pointer;border:none;background:none}
+html,body,button,.keys{touch-action:manipulation}
 button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid var(--flag);outline-offset:2px}
 input,select,textarea{font:inherit;color:var(--ink);background:var(--surface);border:1.5px solid var(--line);border-radius:10px;padding:10px 12px;min-height:48px;width:100%}
 textarea{min-height:120px;font-size:13px;font-family:ui-monospace,Menlo,monospace}
@@ -126,6 +127,12 @@ h3{font-size:13px;letter-spacing:.8px;text-transform:uppercase;color:var(--muted
 .cell.dir{font-size:13px}
 .shot .more{border-radius:10px;font-size:22px;font-weight:700;color:var(--muted)}
 .penline{grid-column:2 / -1;font-size:14px;font-weight:700;color:var(--bad);padding:2px 4px}
+.penrow{display:grid;grid-template-columns:34px minmax(0,1fr) 40px;gap:6px;align-items:stretch}
+.penrow .n{display:grid;place-items:center;font-family:var(--display);font-weight:700;font-size:18px;border-radius:9px;background:var(--sunk);color:var(--bad)}
+.pencell{min-height:46px;border-radius:10px;border:1.5px dashed var(--bad);display:flex;align-items:center;gap:10px;padding:0 12px;text-align:left;font-size:16px;flex-wrap:wrap}
+.pencell b{color:var(--bad)}
+.pencell span{color:var(--muted);font-size:14px}
+.pick.pen{border-color:var(--bad);color:var(--bad)}
 .holed{display:flex;align-items:center;gap:8px;padding:12px 14px;border-radius:12px;background:color-mix(in srgb,var(--accent) 14%,var(--surface));color:var(--good);font-weight:700}
 .addshot{min-height:56px;border:2px dashed var(--line);border-radius:12px;color:var(--muted);font-weight:700;width:100%}
 
@@ -199,7 +206,7 @@ table.sc td.h{font-weight:700}
 <script>
 /* ================= DATOS ================= */
 const KEY='golfApp_v1';
-const VERSION='0.2';
+const VERSION='0.3';
 const IS_PWA=!!window.PWA_BUILD;
 const LIES={T:{n:'Tee',u:'yd'},F:{n:'Fairway',u:'yd'},R:{n:'Rough',u:'yd'},A:{n:'Arena',u:'yd'},X:{n:'Recuperación',u:'yd'},C:{n:'Fringe',u:'ft'},G:{n:'Green',u:'ft'}};
 const PENS={OB:{n:'Fuera de límites',d:'Golpe y distancia',card:1,stat:2},BP:{n:'Bola perdida',d:'Golpe y distancia',card:1,stat:2},AP:{n:'Área de penalidad',d:'1 golpe',card:1,stat:1},IN:{n:'Injugable',d:'1 golpe',card:1,stat:1},OT:{n:'Otra',d:'Eliges los golpes',card:null,stat:null}};
@@ -214,8 +221,17 @@ function esc(s){return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt
 
 let DB=null;
 function load(){
-  try{const raw=localStorage.getItem(KEY);if(raw){DB=JSON.parse(raw);return}}catch(e){}
+  try{const raw=localStorage.getItem(KEY);if(raw){DB=JSON.parse(raw);if((DB.format||1)<2){migrate(DB);save()}return}}catch(e){}
   DB=defaultDB();
+}
+/* formato 2: el castigo es su propia fila en la lista de golpes */
+function migrate(db){
+  (db.rounds||[]).forEach(r=>Object.values(r.holes||{}).forEach(h=>{
+    if(!Array.isArray(h.shots))return;const out=[];
+    h.shots.forEach(x=>{if(x.kind==='pen'){out.push(x);return}const pn=x.pen;delete x.pen;out.push(x);
+      if(pn)out.push({id:uid(),kind:'pen',type:pn.type,strokes:pn.strokes})});
+    h.shots=out}));
+  db.format=2;
 }
 function save(){try{localStorage.setItem(KEY,JSON.stringify(DB))}catch(e){}}
 
@@ -231,6 +247,7 @@ function defaultDB(){
   const db={format:1,players:[player],activePlayer:player.id,bag,retired:[],courses:[course],rounds:[],
     settings:{theme:'system',hideStats:false}};
   db.rounds.push(sampleRound(db,course,player));
+  migrate(db);
   return db;
 }
 function sampleRound(db,course,player){
@@ -260,6 +277,8 @@ const tee=(c,id)=>c&&c.tees.find(t=>t.id===id);
 const club=id=>DB.bag.find(b=>b.id===id)||(DB.retired||[]).find(b=>b.id===id);
 function penCard(p){if(!p)return 0;return p.type==='OT'?(p.strokes||1):PENS[p.type].card}
 function penStat(p){if(!p)return 0;return p.type==='OT'?(p.strokes||1):PENS[p.type].stat}
+const isPen=e=>!!e&&e.kind==='pen';
+function numbering(E){let k=0;return E.map(e=>{const start=k+1;k+=isPen(e)?penCard(e):1;return {start,end:k}})}
 function toYd(s){if(s.dist==null||s.dist==='')return null;return (s.lie==='G'||s.lie==='C')?s.dist/3:s.dist}
 const offGreen=s=>s.lie&&s.lie!=='G';
 
@@ -286,51 +305,35 @@ function holeCalc(r,n){
       udAtt:gir===false&&putts!=null,udMade:gir===false&&putts!=null&&putts<=1&&strokes<=par,udFar:null,
       bunkerAtt:0,bunkerMade:0,recov:null,twoChips:null,bogey150:null,penCard:null,penStat:null,unc:0,shotsN:0};
   }
-  const shots=h.shots||[];
-  if(!shots.length)return out;
-  let cardPen=0,statPen=0;const num=[];let k=0;
-  shots.forEach(s=>{k+=1;num.push(k);k+=penCard(s.pen);cardPen+=penCard(s.pen);statPen+=penStat(s.pen)});
-  const strokes=shots.length+cardPen;
-  const done=!!h.holed;
-  const putts=shots.filter(s=>s.lie==='G').length;
+  const E=h.shots||[];
+  if(!E.length)return out;
+  const nums=numbering(E);const done=!!h.holed;
+  const strokes=nums[nums.length-1].end;
+  let cardPen=0,statPen=0;E.forEach(e=>{if(isPen(e)){cardPen+=penCard(e);statPen+=penStat(e)}});
+  const real=E.filter(e=>!isPen(e));
+  const putts=real.filter(x=>x.lie==='G').length;
+  const fromHere=i=>strokes-nums[i].start+1;
   let fir=null;
-  if(par>=4){
-    if(shots.length>1&&shots[1].lie)fir=!shots[0].pen&&['F','C','G'].includes(shots[1].lie);
-    else if(shots.length===1&&done)fir=true;
-  }
-  let gir=null;
-  const gi=shots.findIndex(s=>s.lie==='G');
-  if(gi>=0)gir=(num[gi]-1)<=par-2;
-  if(done&&gi<0)gir=num[shots.length-1]<=par-2;
-  if(done&&gi>=0&&gir===false){/* keep */}
+  if(par>=4){const fi=E.findIndex(e=>!isPen(e));const nx=E[fi+1];
+    if(nx)fir=isPen(nx)?false:(nx.lie?['F','C','G'].includes(nx.lie):null);else if(done)fir=true}
+  let gir=null;const gi=E.findIndex(e=>!isPen(e)&&e.lie==='G');
+  if(gi>=0)gir=nums[gi].start-1<=par-2;else if(done)gir=strokes<=par-2;
   const R={...out,started:true,done,mode:'detail',strokes,putts,fir,gir,penCard:cardPen,penStat:statPen,
-    recov:shots.filter(s=>s.lie==='X').length,shotsN:shots.length,unc:shots.filter(s=>s.unc).length};
+    recov:real.filter(x=>x.lie==='X').length,shotsN:real.length,unc:real.filter(x=>x.unc).length};
   R.threePutt=done?putts>=3:null;
-  // up & down / scrambling
   R.scrAtt=done&&gir===false;R.scrMade=R.scrAtt&&strokes<=par;
   R.udAtt=false;R.udMade=false;R.udFar=null;
-  if(done&&gir===false){
-    let j=-1;shots.forEach((s,i)=>{if(offGreen(s))j=i});
-    if(j>=0){
-      let fromJ=shots.length-j;for(let i=j;i<shots.length;i++)fromJ+=penCard(shots[i].pen);
-      R.udAtt=true;R.udMade=fromJ<=2&&strokes<=par;
-      const y=toYd(shots[j]);R.udFar=y==null?null:y>=50;
-    }
-  }
-  // bunker
+  if(done&&gir===false){let j=-1;E.forEach((x,i)=>{if(!isPen(x)&&offGreen(x))j=i});
+    if(j>=0){R.udAtt=true;R.udMade=fromHere(j)<=2&&strokes<=par;const y=toYd(E[j]);R.udFar=y==null?null:y>=50}}
   R.bunkerAtt=0;R.bunkerMade=0;
-  shots.forEach((s,i)=>{const y=toYd(s);if(s.lie==='A'&&y!=null&&y<=50){R.bunkerAtt++;
-    let rest=shots.length-i;for(let x=i;x<shots.length;x++)rest+=penCard(shots[x].pen);
-    if(done&&rest<=2)R.bunkerMade++;}});
-  // two chips
+  E.forEach((x,i)=>{if(isPen(x))return;const y=toYd(x);if(x.lie==='A'&&y!=null&&y<=50){R.bunkerAtt++;if(done&&fromHere(i)<=2)R.bunkerMade++}});
   R.twoChips=false;
-  for(let i=0;i+1<shots.length;i++){const a=shots[i],b=shots[i+1];const ya=toYd(a),yb=toYd(b);
+  for(let i=0;i+1<E.length;i++){const a=E[i],b=E[i+1];if(isPen(a)||isPen(b))continue;const ya=toYd(a),yb=toYd(b);
     if(offGreen(a)&&offGreen(b)&&ya!=null&&yb!=null&&ya<=50&&yb<=50){R.twoChips=true;break}}
-  // bogey inside 150 with a GIR chance
   R.bogey150=false;
-  if(done&&strokes>=par+1){
-    shots.forEach((s,i)=>{const y=toYd(s);if(['T','F','R','A'].includes(s.lie)&&y!=null&&y<=150&&num[i]<=par-2)R.bogey150=true});
-  }
+  if(done&&strokes>=par+1)E.forEach((x,i)=>{if(isPen(x))return;const y=toYd(x);if(['T','F','R','A'].includes(x.lie)&&y!=null&&y<=150&&nums[i].start<=par-2)R.bogey150=true});
+  R.drives=[];
+  if(par>=4)E.forEach((x,i)=>{const nx=E[i+1];if(isPen(x)||x.lie!=='T'||!nx||isPen(nx))return;const a=toYd(x),b=toYd(nx);if(a!=null&&b!=null&&a>b)R.drives.push(a-b)});
   return R;
 }
 
@@ -351,6 +354,7 @@ function roundCalc(r){
   A.t5={par5:D.filter(h=>h.par===5&&h.strokes>=6).length,dbl:D.filter(h=>h.strokes>=h.par+2).length,
     three:D.filter(h=>h.threePutt).length,b150:D.filter(h=>h.bogey150).length,chips:D.filter(h=>h.twoChips).length};
   A.shotsN=sum(h=>h.shotsN);A.unc=sum(h=>h.unc);
+  const dr=D.flatMap(h=>h.drives||[]);A.driveN=dr.length;A.driveAvg=dr.length?Math.round(dr.reduce((a,b)=>a+b,0)/dr.length):null;A.driveMax=dr.length?Math.round(Math.max(...dr)):null;
   return A;
 }
 const pct=(a,b)=>b?Math.round(a/b*100)+'%':'–';
@@ -450,6 +454,7 @@ function vHole(){
   const c=course(r.courseId),t=tee(c,r.teeId);const order=holeOrder(r);
   const n=ui.hole;const idx=order.indexOf(n);const par=c.holes[n-1].par;
   const h=r.holes[n]||(r.holes[n]={mode:'detail',shots:[],holed:false,yards:t?t.yards[n-1]:null});
+  if(h.mode!=='quick'&&!h.shots.length&&!h.holed){h.shots.push({id:uid(),lie:'T',dist:h.yards!=null?+h.yards:null,club:null,dir:null,unc:false});touch(r)}
   const A=roundCalc(r);
   const yds=h.yards??(t?t.yards[n-1]:'');
   const head=`<header class="top wrap"><div class="top-in" style="flex-direction:column;align-items:stretch;gap:8px">
@@ -466,11 +471,11 @@ function vHole(){
   let body='';
   if(h.mode==='quick')body=vQuick(h,par);
   else{
-    const shots=h.shots;
+    const shots=h.shots;const nums=numbering(shots);
     const curI=h.holed?-1:shots.length-1;
-    body=`<section class="shots">${shots.map((s,i)=>shotRow(s,i,i===curI,par,h)).join('')}
+    body=`<section class="shots">${shots.map((s,i)=>shotRow(s,i,i===curI,par,nums[i])).join('')}
       ${h.holed?`<div class="holed">✓ Hoyo terminado en ${holeCalc(r,n).strokes} golpes · toca un golpe para corregirlo</div>`:
-        `<button class="addshot" data-a="addShot">+ Golpe ${shots.length+1}</button>`}
+        `<button class="addshot" data-a="addShot">+ Golpe ${(nums.length?nums[nums.length-1].end:0)+1}</button>`}
     </section>`;
   }
   const hide=DB.settings.hideStats;
@@ -484,23 +489,26 @@ function vHole(){
   const last=h.shots[h.shots.length-1];
   const acts=h.mode==='quick'?`<button class="btn primary block" data-a="quickNext">${idx<order.length-1?'Siguiente hoyo':'Terminar ronda'}</button>`:
     h.holed?`<div class="actions" style="grid-template-columns:1fr 1fr"><button class="btn" data-a="sheet" data-v="card">Tarjeta</button><button class="btn primary" data-a="${idx<order.length-1?'nextHole':'finish'}">${idx<order.length-1?'Hoyo '+order[idx+1]+' ›':'Terminar ronda'}</button></div>`:
-    `<div class="actions"><button class="btn" data-a="penalty" ${last?'':'disabled'}>+ Castigo</button><button class="btn" data-a="addShot">+ Golpe</button><button class="btn flag" data-a="holeOut" ${last?'':'disabled'}>Embocada</button></div>`;
+    `<div class="actions" style="grid-template-columns:1fr 2fr"><button class="btn" data-a="addShot">+ Golpe</button><button class="btn flag" data-a="holeOut" ${last?'':'disabled'}>Embocada</button></div>`;
   return head+`<main class="wrap" style="padding-bottom:200px">${body}</main>
   <div class="dock"><div class="dock-in wrap">${live}${acts}</div></div>`;
 }
-function shotRow(s,i,cur,par,h){
+function shotRow(s,i,cur,par,nm){
+  const numTxt=nm.end>nm.start?nm.start+'–'+nm.end:String(nm.start);
+  if(isPen(s)){const P=PENS[s.type];const n=penCard(s);
+    return `<div class="penrow"><div class="n">${numTxt}</div>
+      <button class="pencell" data-a="editPen" data-i="${i}"><b>${P.n}</b><span>${s.type==='OT'?n+' golpe'+(n>1?'s':''):P.d}</span></button>
+      <button class="more" data-a="rowMenu" data-i="${i}" aria-label="Más opciones del castigo">⋯</button></div>`}
   const L=s.lie?LIES[s.lie]:null;const cl=s.club?club(s.club):null;
-  const isTee=i===0&&par>=4;
   const dirLabel=s.dir?(s.dir.length===1?DIRS[s.dir]:s.dir.split('').map(x=>({L:'Lar',A:'Alt',C:'Cor',I:'Izq',E:'Lín',D:'Der'}[x])).join(' ')):'Dir';
-  const canDir=s.lie&&s.lie!=='G'&&s.lie!=='X';
+  const canDir=s.lie&&s.lie!=='X';
   return `<div class="shot${cur?' cur':''}">
-    <div class="n">${i+1}</div>
+    <div class="n">${numTxt}</div>
     <button class="cell ${L?'':'blank'}" data-a="edit" data-f="lie" data-i="${i}">${L?L.n:'Lie'}</button>
     <button class="cell num ${s.dist!=null?'':'blank'}" data-a="edit" data-f="dist" data-i="${i}">${s.dist!=null?s.dist+`<span class="u">${L?L.u:'yd'}</span>`:'Dist.'}</button>
     <button class="cell ${cl?'':'blank'}" data-a="edit" data-f="club" data-i="${i}">${cl?esc(cl.code):'Palo'}</button>
     <button class="cell dir ${s.dir?'':'blank'}" data-a="edit" data-f="dir" data-i="${i}" ${canDir?'':'disabled style="opacity:.35"'}>${dirLabel}</button>
-    <button class="more" data-a="rowMenu" data-i="${i}" aria-label="Más opciones del golpe ${i+1}">⋯</button>
-    ${s.pen?`<div class="penline">+ ${PENS[s.pen.type].n}: ${penCard(s.pen)} golpe${penCard(s.pen)>1?'s':''} en la tarjeta</div>`:''}
+    <button class="more" data-a="rowMenu" data-i="${i}" aria-label="Más opciones del golpe ${nm.start}">⋯</button>
     ${s.unc?'<div class="penline" style="color:var(--warn)">Sin compromiso total</div>':''}
   </div>`;
 }
@@ -528,7 +536,8 @@ function vSummary(){
       <div style="text-align:right"><div class="num" style="font-family:var(--display);font-size:48px;font-weight:700;line-height:1">${A.strokes}</div><div class="${A.toPar<0?'s-u':A.toPar>0?'s-o':'s-e'}">${fmtPar(A.toPar)}</div></div>
     </div>
     <div class="stats">
-      ${st(A.puttHoles?A.putts:'–','Putts',A.puttHoles?(A.putts/A.puttHoles).toFixed(2)+' por hoyo':'')}
+      ${st(A.puttHoles?A.putts:'–','Putts',A.puttHoles?(A.putts/A.puttHoles).toFixed(2)+' por hoyo · solo desde el green':'')}
+      ${st(A.driveAvg??'–','Drive promedio',A.driveN?'Máximo '+A.driveMax+' yd · '+A.driveN+' salidas':'')}
       ${st(pct(A.firHit,A.firN),'Fairways',A.firHit+' de '+A.firN)}
       ${st(pct(A.girHit,A.girN),'Greens en regulación',A.girHit+' de '+A.girN)}
       ${st(pct(A.udMade,A.udAtt),'Up & down',`${A.udMade} de ${A.udAtt} · <50 yd ${A.udNearMade}/${A.udNearAtt} · 50+ ${A.udFarMade}/${A.udFarAtt}`)}
@@ -647,7 +656,7 @@ function closeSheet(){
   // remove a fresh shot left completely empty
   const r=curRound();
   if(r&&ui.view==='hole'){const h=r.holes[ui.hole];if(h&&h.shots.length){const s=h.shots[h.shots.length-1];
-    if(s.fresh&&!s.lie&&s.dist==null&&!s.club&&!s.pen){h.shots.pop();touch(r)} else if(s)delete s.fresh}}
+    if(s.fresh&&!s.lie&&s.dist==null&&!s.club){h.shots.pop();touch(r)} else if(s)delete s.fresh}}
   ui.sheet=null;ui.chain=null;render();
 }
 function renderSheet(){
@@ -655,49 +664,51 @@ function renderSheet(){
   const r=curRound();const h=r&&r.holes[ui.hole];const shot=h&&s.i!=null?h.shots[s.i]:null;
   let title='',body='';
   const par=r&&course(r.courseId).holes[ui.hole-1].par;
+  const NM=h&&h.shots?numbering(h.shots):[];const gn=s.i!=null&&NM[s.i]?NM[s.i].start:'';
   if(s.type==='lie'){
-    title=`Lie del golpe ${s.i+1}`;
+    title=`Lie del golpe ${gn}`;
     const b=(k,cls)=>`<button class="pick ${cls||''} lie-${k} ${shot&&shot.lie===k?'on':''}" data-a="setLie" data-v="${k}">${LIES[k].n}</button>`;
+    const prev=s.i>0?h.shots[s.i-1]:null;
     body=`<div class="grid2">${b('F','big')}${b('R','big')}</div>
       <div class="grid2">${b('G','big')}${b('A','big')}</div>
       <div class="grid3">${b('C')}${b('X')}${b('T')}</div>
-      <div class="grid2"><button class="btn ghost" data-a="skip">Saltar</button>${s.i>0&&s.chain?`<button class="btn flag" data-a="prevHoled">El golpe ${s.i} entró</button>`:''}</div>`;
+      ${s.i>0?`<button class="pick pen" data-a="lieIsPen">Castigo<small>Fuera de límites, bola perdida, área de penalidad, injugable</small></button>`:''}
+      <div class="grid2"><button class="btn ghost" data-a="skip">Saltar</button>${prev&&!isPen(prev)&&s.chain?`<button class="btn flag" data-a="prevHoled">El golpe ${NM[s.i-1].start} entró</button>`:''}</div>`;
   }else if(s.type==='dist'){
-    const L=shot.lie?LIES[shot.lie]:LIES.F;title=`Distancia al hoyo · golpe ${s.i+1}`;
+    const L=shot.lie?LIES[shot.lie]:LIES.F;title=`Distancia al hoyo · golpe ${gn}`;
     const v=s.buf??'';
     body=`<div class="display num">${v||'<span class="muted">0</span>'}<span class="u">${L.u==='ft'?'pies':'yardas'}</span></div>
       <div class="keys">${[1,2,3,4,5,6,7,8,9].map(d=>`<button data-a="key" data-v="${d}">${d}</button>`).join('')}<button data-a="key" data-v="C" style="font-size:18px">Borrar</button><button data-a="key" data-v="0">0</button><button data-a="key" data-v="B" aria-label="Retroceso">⌫</button></div>
       <div class="grid2"><button class="btn ghost" data-a="skip">Saltar</button><button class="btn primary" data-a="saveDist">Guardar</button></div>`;
   }else if(s.type==='club'){
-    title=`Palo del golpe ${s.i+1}`;
+    title=`Palo del golpe ${gn}`;
     const bag=(r.dayBag||[]).map(club).filter(Boolean);
     body=`<div class="grid4">${bag.map(b=>`<button class="pick ${shot.club===b.id?'sel':''}" data-a="setClub" data-id="${b.id}">${esc(b.code)}</button>`).join('')}</div>
       <button class="btn ghost block" data-a="skip">Saltar</button>`;
   }else if(s.type==='dir'){
-    const teeShot=s.i===0&&par>=4;title=`Dirección · golpe ${s.i+1}`;
+    const teeShot=shot.lie==='T'&&par>=4;const putt=shot.lie==='G'||shot.lie==='C';title=`Dirección · golpe ${gn}`;
     if(teeShot)body=`<div class="grid3">${Object.entries(DIRS).map(([k,l])=>`<button class="pick big ${shot.dir===k?'sel':''}" data-a="setDir" data-v="${k}">${l==='Izq.'?'Izquierda':l==='Der.'?'Derecha':l}</button>`).join('')}</div>`;
-    else body=`<p class="muted" style="margin:0;font-size:14px">Dónde quedó respecto de la bandera.</p><div class="dirgrid"><div></div>${GRID_COLS.map(c=>`<div class="lab">${c[1]}</div>`).join('')}
-      ${GRID_ROWS.map(rw=>`<div class="lab" style="text-align:right;padding-right:4px">${rw[1]}</div>${GRID_COLS.map(cl=>{const k=rw[0]+cl[0];return `<button class="pick ${rw[0]==='A'&&cl[0]==='E'?'center':''} ${shot.dir===k?'sel':''}" data-a="setDir" data-v="${k}">${rw[0]==='A'&&cl[0]==='E'?'Pin high':'·'}</button>`}).join('')}`).join('')}</div>`;
+    else body=`<p class="muted" style="margin:0;font-size:14px">Dónde quedó respecto ${putt?'del hoyo':'de la bandera'}.</p><div class="dirgrid"><div></div>${GRID_COLS.map(c=>`<div class="lab">${c[1]}</div>`).join('')}
+      ${GRID_ROWS.map(rw=>`<div class="lab" style="text-align:right;padding-right:4px">${rw[1]}</div>${GRID_COLS.map(cl=>{const k=rw[0]+cl[0];const ctr=rw[0]==='A'&&cl[0]==='E';return `<button class="pick ${ctr?'center':''} ${shot.dir===k?'sel':''}" data-a="setDir" data-v="${k}">${ctr&&!putt?'Pin high':'·'}</button>`}).join('')}`).join('')}</div>`;
     body+=`<button class="btn ghost block" data-a="setDir" data-v="">Quitar dirección</button>`;
   }else if(s.type==='pen'){
-    title=`Castigo en el golpe ${s.i+1}`;
-    body=`<div class="grid2">${Object.entries(PENS).map(([k,p])=>`<button class="pick ${shot.pen&&shot.pen.type===k?'sel':''}" data-a="setPen" data-v="${k}">${p.n}<small>${p.d}</small></button>`).join('')}</div>
+    title=s.edit?'Cambiar castigo':`Castigo · golpe ${gn}`;
+    body=`<div class="grid2">${Object.entries(PENS).map(([k,p])=>`<button class="pick ${isPen(shot)&&shot.type===k?'sel':''}" data-a="setPen" data-v="${k}">${p.n}<small>${p.d}</small></button>`).join('')}</div>
       ${s.ot?`<div class="card"><h3>Golpes de castigo</h3><div class="grid3" style="margin-top:10px">${[1,2,3].map(n=>`<button class="pick" data-a="setOt" data-v="${n}">${n}</button>`).join('')}</div></div>`:''}
-      ${shot.pen?`<button class="btn danger block" data-a="setPen" data-v="">Quitar castigo</button>`:''}`;
+      ${s.edit?`<button class="btn danger block" data-a="delShot">Quitar castigo</button>`:''}`;
   }else if(s.type==='rowMenu'){
-    title=`Golpe ${s.i+1}`;
+    title=isPen(shot)?'Castigo':`Golpe ${gn}`;
     body=`<button class="btn block" data-a="insertBefore">Insertar un golpe antes</button>
-      <button class="btn block" data-a="penaltyAt">Castigo</button>
-      ${r.mental?`<button class="btn block" data-a="toggleUnc">${shot.unc?'Marcar con compromiso':'Marcar sin compromiso'}</button>`:''}
-      <button class="btn danger block" data-a="delShot">Eliminar golpe</button>`;
+      ${!isPen(shot)&&r.mental?`<button class="btn block" data-a="toggleUnc">${shot.unc?'Marcar con compromiso':'Marcar sin compromiso'}</button>`:''}
+      <button class="btn danger block" data-a="delShot">${isPen(shot)?'Eliminar castigo':'Eliminar golpe'}</button>`;
   }else if(s.type==='holeOut'){
     title='¿Qué putt entró?';
-    body=`<button class="btn flag block" data-a="holedThis">Entró este putt (golpe ${h.shots.length})</button>
+    body=`<button class="btn flag block" data-a="holedThis">Entró este putt (golpe ${NM.length?NM[NM.length-1].end:''})</button>
       <button class="btn block" data-a="holedNext">Entró el siguiente (putt corto)</button>`;
   }else if(s.type==='mental'){
     title='Mental Scorecard';
     body=`<p class="muted" style="margin:0">Marca los golpes en que no estuviste comprometido con el golpe.</p>
-      <div class="grid4">${h.shots.map((x,i)=>`<button class="pick ${x.unc?'sel':''}" data-a="mentalTog" data-i="${i}">${i+1}<small>${x.lie?LIES[x.lie].n:''}</small></button>`).join('')}</div>
+      <div class="grid4">${h.shots.map((x,i)=>isPen(x)?'':`<button class="pick ${x.unc?'sel':''}" data-a="mentalTog" data-i="${i}">${NM[i].start}<small>${x.lie?LIES[x.lie].n:''}</small></button>`).join('')}</div>
       <button class="btn primary block" data-a="mentalDone">Listo</button>`;
   }else if(s.type==='card'){
     title='Tarjeta';body=scorecard(r)+`<button class="btn block" data-a="openSummaryCur">Ver resumen</button>`;
@@ -759,12 +770,21 @@ function afterField(s,field){
   }
   advanceAfterClub(i);
 }
+function openTeeChain(){const h=H();if(h&&h.mode!=='quick'&&h.shots.length===1&&!h.holed&&!h.shots[0].club)openSheet({type:'club',i:0,chain:true})}
+function afterPen(sh){
+  const r=curRound(),h=H();const i=sh.i;ui.sheet=null;touch(r);
+  if(sh.edit||h.holed||i!==h.shots.length-1){render();return}
+  const e=h.shots[i];
+  if(e.type==='OB'||e.type==='BP'){let p=i-1;while(p>=0&&isPen(h.shots[p]))p--;const prev=h.shots[p];
+    if(prev)h.shots.push({id:uid(),lie:prev.lie,dist:prev.dist,club:prev.club,dir:null,unc:false})}
+  h.shots.push(newShot());touch(r);render();openSheet({type:'lie',i:h.shots.length-1,chain:true});
+}
 function holeDone(){
   const r=curRound(),h=H();h.holed=true;touch(r);
   if(r.mental){ui.sheet={type:'mental'};render();return}
   ui.sheet=null;render();toast('Hoyo '+ui.hole+' terminado');
 }
-function nextHole(){const r=curRound();const o=holeOrder(r);const i=o.indexOf(ui.hole);if(i<o.length-1){ui.hole=o[i+1];r.currentHole=ui.hole;touch(r)}ui.sheet=null;render();window.scrollTo(0,0)}
+function nextHole(){const r=curRound();const o=holeOrder(r);const i=o.indexOf(ui.hole);if(i<o.length-1){ui.hole=o[i+1];r.currentHole=ui.hole;touch(r)}ui.sheet=null;render();window.scrollTo(0,0);openTeeChain()}
 
 /* ================= EVENTOS ================= */
 document.addEventListener('click',e=>{
@@ -787,7 +807,7 @@ document.addEventListener('click',e=>{
     case 'startRound':{const e2=ui.edit;const c=course(e2.courseId);if(!c)return;
       const rr={id:uid(),playerId:DB.activePlayer,courseId:c.id,teeId:e2.teeId,date:e2.date||today(),length:c.holes.length===9?'front':e2.length,startHole:+e2.startHole||1,
         tournament:e2.tournament,mental:e2.mental,dayBag:e2.dayBag,holes:{},status:'open',createdAt:now(),updatedAt:now()};
-      DB.rounds.push(rr);save();ui.edit=null;ui.roundId=rr.id;ui.hole=holeOrder(rr)[0];rr.currentHole=ui.hole;go('hole');break}
+      DB.rounds.push(rr);save();ui.edit=null;ui.roundId=rr.id;ui.hole=holeOrder(rr)[0];rr.currentHole=ui.hole;go('hole');openTeeChain();break}
     /* hoyo */
     case 'hole':if(v&&v!=='undefined'){ui.hole=+v;r.currentHole=ui.hole;touch(r);render();window.scrollTo(0,0)}break;
     case 'mode':{const h=H();if(v==='quick'&&h.shots.length&&!h.quick){h.quick={strokes:null,putts:null,fir:null,gir:null}}h.mode=v;touch(r);render();break}
@@ -801,18 +821,11 @@ document.addEventListener('click',e=>{
     case 'skip':{const shot=H().shots[sh.i];const f=sh.type;afterField(shot,f==='lie'?'lie':f==='dist'?'dist':'club');break}
     case 'prevHoled':{const h=H();h.shots.splice(sh.i,1);ui.sheet=null;holeDone();break}
     case 'setDir':{const shot=H().shots[sh.i];shot.dir=v||null;ui.sheet=null;touch(r);render();break}
-    case 'penalty':{const h=H();openSheet({type:'pen',i:h.shots.length-1});break}
-    case 'penaltyAt':openSheet({type:'pen',i:sh.i});break;
-    case 'setPen':{const h=H();const shot=h.shots[sh.i];
-      if(!v){shot.pen=null;ui.sheet=null;touch(r);render();break}
-      if(v==='OT'){sh.ot=true;renderSheet();break}
-      shot.pen={type:v};touch(r);ui.sheet=null;
-      const isLast=sh.i===h.shots.length-1;
-      if(isLast&&!h.holed&&(v==='OB'||v==='BP')){h.shots.push(newShot({lie:shot.lie,dist:shot.dist}));delete h.shots[h.shots.length-1].fresh;touch(r);render();startChainFor(h.shots.length-1);break}
-      if(isLast&&!h.holed){addShot();break}
-      render();break}
-    case 'setOt':{const h=H();const shot=h.shots[sh.i];shot.pen={type:'OT',strokes:+v};touch(r);ui.sheet=null;
-      if(sh.i===h.shots.length-1&&!h.holed){addShot();break}render();break}
+    case 'lieIsPen':openSheet({type:'pen',i:sh.i,chain:sh.chain});break;
+    case 'editPen':openSheet({type:'pen',i:+el.dataset.i,edit:true});break;
+    case 'setPen':{if(v==='OT'){sh.ot=true;renderSheet();break}
+      const h=H();h.shots[sh.i]={id:h.shots[sh.i].id,kind:'pen',type:v};afterPen(sh);break}
+    case 'setOt':{const h=H();h.shots[sh.i]={id:h.shots[sh.i].id,kind:'pen',type:'OT',strokes:+v};afterPen(sh);break}
     case 'rowMenu':openSheet({type:'rowMenu',i:+el.dataset.i});break;
     case 'insertBefore':{const h=H();const i=sh.i;const ns=newShot();delete ns.fresh;h.shots.splice(i,0,ns);touch(r);ui.sheet=null;render();openSheet({type:'lie',i});break}
     case 'delShot':{const h=H();const wasLast=sh.i===h.shots.length-1;h.shots.splice(sh.i,1);if(!h.shots.length||wasLast)h.holed=false;touch(r);ui.sheet=null;render();break}
@@ -820,7 +833,7 @@ document.addEventListener('click',e=>{
     case 'holeOut':{const h=H();const last=h.shots[h.shots.length-1];if(!last)break;
       if(last.fresh&&!last.lie&&last.dist==null){h.shots.pop()}
       const L=h.shots[h.shots.length-1];if(!L){render();break}delete L.fresh;
-      if(L.lie==='G'){openSheet({type:'holeOut'});break}
+      if(!isPen(L)&&L.lie==='G'){openSheet({type:'holeOut'});break}
       holeDone();break}
     case 'holedThis':holeDone();break;
     case 'holedNext':{const h=H();h.shots.push({id:uid(),lie:'G',dist:null,club:putterId(),dir:null,pen:null,unc:false});holeDone();break}
